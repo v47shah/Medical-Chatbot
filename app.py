@@ -14,6 +14,22 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.runnables import RunnableWithMessageHistory
 
+load_dotenv()
+
+
+# --------------------
+# Conversation State
+# --------------------
+
+conversation_state = {}
+
+def has_active_medical_context(session_id: str) -> bool:
+    return conversation_state.get(session_id, False)
+
+def set_medical_context(session_id: str):
+    conversation_state[session_id] = True
+
+
 # --------------------
 # Chat History Store
 # --------------------
@@ -30,7 +46,6 @@ def get_chat_history(session_id: str):
 # App + ENV
 # --------------------
 app = Flask(__name__)
-load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -98,20 +113,76 @@ def index():
     return render_template("chat.html")
 
 
+# @app.route("/get", methods=["POST"])
+# def chat():
+#     msg = request.form["msg"]
+
+#     if not is_medical_question(msg):
+#         return "I can only answer medical-related questions."
+    
+#     session_id = request.form.get("session_id", "default")
+
+#     print("User:", msg)
+
+#     answer = rag_chain.invoke(
+#         {"question": msg},
+#         config={"configurable": {"session_id": session_id}}
+#     )
+
+#     print("Response:", answer)
+#     return str(answer)
+from src.classifier import classify_intent
+
 @app.route("/get", methods=["POST"])
 def chat():
     msg = request.form["msg"]
-    session_id = request.form.get("session_id", "default")
+    session_id = request.remote_addr  # simple session key
 
-    print("User:", msg)
+    intent = classify_intent(msg)
 
-    answer = rag_chain.invoke(
-        {"question": msg},
-        config={"configurable": {"session_id": session_id}}
+    # 1️⃣ Greeting
+    if intent == "GREETING":
+        return (
+            "Hi! 👋 I’m a medical chatbot. "
+            "I can help answer questions about symptoms, diseases, "
+            "treatments, and first aid."
+        )
+
+    # 2️⃣ Medical question
+    if intent == "MEDICAL_QUESTION":
+        set_medical_context(session_id)
+
+        docs = retriever.invoke(msg)
+        if not docs:
+            return "I don't know based on the provided medical documents."
+
+        return rag_chain.invoke(
+            {"question": msg},
+            config={"configurable": {"session_id": session_id}}
+        )   
+
+    # 3️⃣ Medical follow-up (conversational!)
+    if intent == "MEDICAL_FOLLOWUP":
+        if not has_active_medical_context(session_id):
+            return (
+                "Could you please provide more details about the medical "
+                "issue you're referring to?"
+            )
+
+        docs = retriever.invoke(msg)
+        if not docs:
+            return "I don't know based on the provided medical documents."
+
+        return rag_chain.invoke(
+            {"question": msg},
+            config={"configurable": {"session_id": session_id}}
+        )   
+
+    # 4️⃣ Out of scope
+    return (
+        "I can only help with medical-related questions. "
+        "Please ask about symptoms, treatments, or first aid."
     )
-
-    print("Response:", answer)
-    return str(answer)
 
 
 # --------------------
