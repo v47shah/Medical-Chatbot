@@ -11,11 +11,11 @@ from langchain_pinecone import PineconeVectorStore
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.runnables import RunnableWithMessageHistory
+from langchain_core.runnables import RunnablePassthrough, RunnableWithMessageHistory
 
 load_dotenv()
 
+from src.classifier import classify_intent
 
 # --------------------
 # Conversation State
@@ -82,7 +82,7 @@ chat_model = ChatOpenAI(
 
 
 # --------------------
-# LCEL RAG Chain (replacement for create_retrieval_chain)
+# LCEL RAG Chain 
 # --------------------
 from langchain_core.runnables import RunnablePassthrough
 
@@ -131,7 +131,6 @@ def index():
 
 #     print("Response:", answer)
 #     return str(answer)
-from src.classifier import classify_intent
 
 @app.route("/get", methods=["POST"])
 def chat():
@@ -189,4 +188,4 @@ def chat():
 # Run
 # --------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True, use_reloader=False)
