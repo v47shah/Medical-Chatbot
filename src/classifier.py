@@ -16,13 +16,15 @@ Classify the user's message into ONE of the following intents:
 - GREETING
 - MEDICAL_QUESTION
 - MEDICAL_FOLLOWUP
+- EMERGENCY
 - OUT_OF_SCOPE
 
 Rules:
-- Greetings and polite openers → GREETING
-- Questions about health, symptoms, diseases, treatment → MEDICAL_QUESTION
-- Short follow-ups relying on prior medical context → MEDICAL_FOLLOWUP
-
+- Life-threatening symptoms (chest pain, difficulty breathing, stroke symptoms,
+  severe bleeding, loss of consciousness, suicidal thoughts) → EMERGENCY
+- Health-related questions → MEDICAL_QUESTION
+- Short follow-ups → MEDICAL_FOLLOWUP
+- Greetings → GREETING
 - Anything else → OUT_OF_SCOPE
 
 Respond with ONLY the intent name.
@@ -30,6 +32,7 @@ Respond with ONLY the intent name.
 Message: {message}
 """
 )
+
 
 classifier_chain = (
     classifier_prompt
