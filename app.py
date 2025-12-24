@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 import os
 import requests
 
-from src.helper import download_hugging_face_embeddings
-from src.prompt import chat_prompt
+# from src.helper import (describe_image, download_hugging_face_embeddings)
+# from src.prompt import chat_prompt, IMAGE_DESCRIPTION_PROMPT
 from src.prompt import *
 import re
 
@@ -18,7 +18,8 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 load_dotenv()
 
 from src.classifier import classify_intent
-
+from src.prompt import chat_prompt, IMAGE_DESCRIPTION_PROMPT
+from src.helper import (describe_image, download_hugging_face_embeddings)
 
 
 # # =========================================================
@@ -256,13 +257,64 @@ def chat():
 
     # 🚫 Out of scope
     return (
-        "I can only help with medical-related questions.\n"
+        "I can only help with medical-related questions or images.\n"
         "Please ask about symptoms, treatments, or emergencies."
     )
+
+#########################################################################
+# ==============================
+# IMAGE + TEXT PIPELINE
+# ==============================
+@app.route("/upload_image", methods=["POST"])
+def upload_image():
+    session_id = request.remote_addr
+
+    image = request.files.get("image")     # optional
+    question = request.form.get("question", "").strip()
+
+    if not image and not question:
+        return "Please provide a question or an image."
+
+    image_description = ""
+
+    # 1️⃣ IMAGE → VISIBLE DESCRIPTION
+    if image:
+        image_description = describe_image(image)
+
+    # 2️⃣ COMBINE IMAGE + TEXT FOR INTENT
+    combined_text = (
+        f"User text: {question}\n"
+        f"Image observation: {image_description}"
+    ).strip()
+
+    intent = classify_intent(combined_text)
+
+    # 3️⃣ ROUTING (REUSE EXISTING LOGIC)
+    if intent == "EMERGENCY" or is_serious_medical(combined_text):
+        set_medical_context(session_id)
+        set_awaiting_location(session_id, True)
+        return (
+            "⚠️ This may be a medical emergency.\n\n"
+            "If this is urgent, please call your local emergency number immediately.\n\n"
+            "If you want, type your address or city and I’ll find the nearest hospitals."
+        )
+
+    if intent == "OUT_OF_SCOPE":
+        return (
+            "I can only help with medical-related concerns.\n"
+            "Please describe a health issue."
+        )
+
+    set_medical_context(session_id)
+    return rag_chain.invoke(
+        {"question": combined_text},
+        config={"configurable": {"session_id": session_id}}
+    )
+###############################################################################################
 
 # =========================================================
 # Run
 # =========================================================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    app.run(host="0.0.0.0", port=8080, debug=True)
 

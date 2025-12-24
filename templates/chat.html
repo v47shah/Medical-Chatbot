@@ -11,7 +11,8 @@
     <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
 
     <!-- Your CSS -->
-    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}"/>
+    <link rel="stylesheet" type="text/css"
+          href="{{ url_for('static', filename='style.css') }}"/>
 </head>
 
 <body>
@@ -38,22 +39,48 @@
                 <!-- Messages -->
                 <div id="messageFormeight" class="card-body msg_card_body"></div>
 
+                <!-- Image preview -->
+                <div id="imagePreviewContainer" class="p-2" style="display:none;">
+                    <img id="imagePreview"
+                         style="max-width:150px; border-radius:10px;" />
+                    <button id="removeImage"
+                            class="btn btn-sm btn-danger ml-2">
+                        Remove
+                    </button>
+                </div>
+
                 <!-- Input -->
                 <div class="card-footer">
                     <form id="messageArea" class="input-group">
+
+                        <!-- Hidden image input -->
+                        <input type="file"
+                               id="imageInput"
+                               accept="image/*"
+                               hidden />
+
                         <input type="text"
                                id="text"
-                               name="msg"
                                placeholder="Type your message..."
                                autocomplete="off"
-                               class="form-control type_msg"
-                               required/>
+                               class="form-control type_msg"/>
+
                         <div class="input-group-append">
+
+                            <!-- Camera button -->
+                            <button type="button"
+                                    id="imageBtn"
+                                    class="input-group-text">
+                                <i class="fas fa-camera"></i>
+                            </button>
+
+                            <!-- Send button -->
                             <button type="submit"
                                     id="send"
                                     class="input-group-text send_btn">
                                 <i class="fas fa-location-arrow"></i>
                             </button>
+
                         </div>
                     </form>
                 </div>
@@ -64,7 +91,6 @@
 </div>
 
 <script>
-    // Format bot responses (bullets, bold, newlines)
     function formatBotMessage(text) {
         return text
             .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
@@ -72,63 +98,143 @@
             .replace(/\n/g, "<br>");
     }
 
+    // 🔄 Loading indicator
+    function showLoading() {
+        const loadingHtml =
+            '<div class="d-flex justify-content-start mb-4" id="loadingBubble">' +
+                '<div class="img_cont_msg">' +
+                    '<img src="https://cdn-icons-png.flaticon.com/512/387/387569.png" ' +
+                         'class="rounded-circle user_img_msg">' +
+                '</div>' +
+                '<div class="msg_cotainer">' +
+                    '<i class="fas fa-spinner fa-spin"></i> Thinking...' +
+                '</div>' +
+            '</div>';
+
+        $("#messageFormeight").append(loadingHtml);
+        $("#messageFormeight").scrollTop(
+            $("#messageFormeight")[0].scrollHeight
+        );
+    }
+
+    function hideLoading() {
+        $("#loadingBubble").remove();
+    }
+
+    let selectedImage = null;
+
     $(document).ready(function () {
 
-        // 🔁 RESET BACKEND MEMORY ON PAGE LOAD
-        fetch("/reset", { method: "POST" });
+        // 📷 Open image picker
+        $("#imageBtn").on("click", function () {
+            $("#imageInput").click();
+        });
+
+        // 🖼️ Preview image
+        $("#imageInput").on("change", function (e) {
+            selectedImage = e.target.files[0];
+            if (!selectedImage) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                $("#imagePreview").attr("src", e.target.result);
+                $("#imagePreviewContainer").show();
+            };
+            reader.readAsDataURL(selectedImage);
+        });
+
+        // ❌ Remove image
+        $("#removeImage").on("click", function () {
+            selectedImage = null;
+            $("#imageInput").val("");
+            $("#imagePreviewContainer").hide();
+        });
 
         $("#messageArea").on("submit", function (event) {
             event.preventDefault();
 
-            const date = new Date();
-            const str_time =
-                date.getHours() + ":" + String(date.getMinutes()).padStart(2, "0");
-
-            const rawText = $("#text").val();
+            const rawText = $("#text").val().trim();
             $("#text").val("");
 
-            // User bubble
+            if (!rawText && !selectedImage) return;
+
+            const date = new Date();
+            const str_time =
+                date.getHours() + ":" +
+                String(date.getMinutes()).padStart(2, "0");
+
+            // User message bubble
             const userHtml =
                 '<div class="d-flex justify-content-end mb-4">' +
                     '<div class="msg_cotainer_send">' +
-                        rawText +
+                        (rawText || "[Image uploaded]") +
                         '<span class="msg_time_send">' + str_time + '</span>' +
                     '</div>' +
                     '<div class="img_cont_msg">' +
-                        '<img src="https://i.ibb.co/d5b84Xw/Untitled-design.png" class="rounded-circle user_img_msg">' +
+                        '<img src="https://i.ibb.co/d5b84Xw/Untitled-design.png" ' +
+                             'class="rounded-circle user_img_msg">' +
                     '</div>' +
                 '</div>';
 
             $("#messageFormeight").append(userHtml);
 
-            // Send message to backend
+            // 🔄 Show loading
+            showLoading();
+
+            // 🧠 IMAGE + TEXT
+            if (selectedImage) {
+                const formData = new FormData();
+                formData.append("image", selectedImage);
+                formData.append("question", rawText);
+
+                $.ajax({
+                    url: "/upload_image",
+                    type: "POST",
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                }).done(function (data) {
+                    hideLoading();
+                    appendBotMessage(data, str_time);
+                });
+
+                selectedImage = null;
+                $("#imageInput").val("");
+                $("#imagePreviewContainer").hide();
+                return;
+            }
+
+            // 🧠 TEXT ONLY
             $.ajax({
                 data: { msg: rawText },
                 type: "POST",
                 url: "/get",
             }).done(function (data) {
-
-                const formatted = formatBotMessage(data);
-
-                const botHtml =
-                    '<div class="d-flex justify-content-start mb-4">' +
-                        '<div class="img_cont_msg">' +
-                            '<img src="https://cdn-icons-png.flaticon.com/512/387/387569.png" class="rounded-circle user_img_msg">' +
-                        '</div>' +
-                        '<div class="msg_cotainer">' +
-                            formatted +
-                            '<span class="msg_time">' + str_time + '</span>' +
-                        '</div>' +
-                    '</div>';
-
-                $("#messageFormeight").append(botHtml);
-
-                // Auto-scroll
-                $("#messageFormeight").scrollTop(
-                    $("#messageFormeight")[0].scrollHeight
-                );
+                hideLoading();
+                appendBotMessage(data, str_time);
             });
         });
+
+        function appendBotMessage(data, time) {
+            const formatted = formatBotMessage(data);
+
+            const botHtml =
+                '<div class="d-flex justify-content-start mb-4">' +
+                    '<div class="img_cont_msg">' +
+                        '<img src="https://cdn-icons-png.flaticon.com/512/387/387569.png" ' +
+                             'class="rounded-circle user_img_msg">' +
+                    '</div>' +
+                    '<div class="msg_cotainer">' +
+                        formatted +
+                        '<span class="msg_time">' + time + '</span>' +
+                    '</div>' +
+                '</div>';
+
+            $("#messageFormeight").append(botHtml);
+            $("#messageFormeight").scrollTop(
+                $("#messageFormeight")[0].scrollHeight
+            );
+        }
     });
 </script>
 

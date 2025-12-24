@@ -3,7 +3,7 @@ from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_community.embeddings import HuggingFaceEmbeddings
-
+from src.prompt import IMAGE_DESCRIPTION_PROMPT
 
 
 #Extract Data From the PDF File
@@ -48,3 +48,40 @@ def text_split(extracted_data):
 def download_hugging_face_embeddings():
     embeddings=HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')  #this model return 384 dimensions
     return embeddings
+
+#############################################################################
+# Image Description Function
+#############################################################################
+import base64
+from openai import OpenAI
+import os
+
+vision_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def describe_image(image_file):
+    """
+    Returns a neutral, visible-only description of the image.
+    """
+    image_bytes = image_file.read()
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    response = vision_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": IMAGE_DESCRIPTION_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_b64}"
+                        }
+                    }
+                ]
+            }
+        ],
+        max_tokens=150
+    )
+
+    return response.choices[0].message.content.strip()
