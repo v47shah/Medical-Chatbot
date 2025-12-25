@@ -10,9 +10,8 @@
     <!-- jQuery -->
     <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
 
-    <!-- Your CSS -->
-    <link rel="stylesheet" type="text/css"
-          href="{{ url_for('static', filename='style.css') }}"/>
+    <!-- App CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
 <body>
@@ -23,15 +22,12 @@
 
                 <!-- Header -->
                 <div class="card-header msg_head">
-                    <div class="d-flex bd-highlight">
-                        <div class="img_cont">
-                            <img src="https://cdn-icons-png.flaticon.com/512/387/387569.png"
-                                 class="rounded-circle user_img">
-                            <span class="online_icon"></span>
-                        </div>
-                        <div class="user_info">
+                    <div class="d-flex align-items-center">
+                        <img src="https://cdn-icons-png.flaticon.com/512/387/387569.png"
+                             class="rounded-circle user_img">
+                        <div class="user_info ml-3">
                             <span>Medical Chatbot</span>
-                            <p>Ask me anything!</p>
+                            <p>Ask me anything</p>
                         </div>
                     </div>
                 </div>
@@ -41,43 +37,34 @@
 
                 <!-- Image preview -->
                 <div id="imagePreviewContainer" class="p-2" style="display:none;">
-                    <img id="imagePreview"
-                         style="max-width:150px; border-radius:10px;" />
-                    <button id="removeImage"
-                            class="btn btn-sm btn-danger ml-2">
-                        Remove
-                    </button>
+                    <img id="imagePreview" style="max-width:120px;border-radius:10px;">
+                    <button id="removeImage" class="btn btn-sm btn-danger ml-2">Remove</button>
                 </div>
 
                 <!-- Input -->
                 <div class="card-footer">
                     <form id="messageArea" class="input-group">
 
-                        <!-- Hidden image input -->
-                        <input type="file"
-                               id="imageInput"
-                               accept="image/*"
-                               hidden />
+                        <input type="file" id="imageInput" accept="image/*" hidden>
 
-                        <input type="text"
-                               id="text"
-                               placeholder="Type your message..."
-                               autocomplete="off"
-                               class="form-control type_msg"/>
+                        <input type="text" id="text"
+                               placeholder="Type your message or use the mic…"
+                               class="form-control type_msg">
 
                         <div class="input-group-append">
 
-                            <!-- Camera button -->
-                            <button type="button"
-                                    id="imageBtn"
-                                    class="input-group-text">
+                            <!-- Mic -->
+                            <button type="button" id="micBtn" class="input-group-text">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+
+                            <!-- Camera -->
+                            <button type="button" id="imageBtn" class="input-group-text">
                                 <i class="fas fa-camera"></i>
                             </button>
 
-                            <!-- Send button -->
-                            <button type="submit"
-                                    id="send"
-                                    class="input-group-text send_btn">
+                            <!-- Send -->
+                            <button type="submit" class="input-group-text send_btn">
                                 <i class="fas fa-location-arrow"></i>
                             </button>
 
@@ -91,152 +78,198 @@
 </div>
 
 <script>
-    function formatBotMessage(text) {
-        return text
-            .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-            .replace(/^- /gm, "• ")
-            .replace(/\n/g, "<br>");
+/* ================= Formatting ================= */
+
+function formatBotMessage(text) {
+    return text
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/^- /gm, "• ")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/\n/g, "<br>");
+}
+
+/* ================= Helpers ================= */
+
+function scrollDown() {
+    $("#messageFormeight").scrollTop($("#messageFormeight")[0].scrollHeight);
+}
+
+function showLoading(label="Thinking…") {
+    $("#messageFormeight").append(`
+        <div class="d-flex align-items-start justify-content-start mb-2" id="loadingBubble">
+            <div class="msg_cotainer">
+                <i class="fas fa-spinner fa-spin"></i> ${label}
+            </div>
+        </div>
+    `);
+    scrollDown();
+}
+
+function hideLoading() {
+    $("#loadingBubble").remove();
+}
+
+/* ================= State ================= */
+let selectedImage = null;
+let mediaRecorder = null;
+let audioChunks = [];
+
+/* ================= Ready ================= */
+
+$(document).ready(function () {
+
+    /* ---------- Image ---------- */
+    $("#imageBtn").click(() => $("#imageInput").click());
+
+    $("#imageInput").on("change", function (e) {
+        selectedImage = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = e => {
+            $("#imagePreview").attr("src", e.target.result);
+            $("#imagePreviewContainer").show();
+        };
+        reader.readAsDataURL(selectedImage);
+    });
+
+    $("#removeImage").click(() => clearImage());
+
+    function clearImage() {
+        selectedImage = null;
+        $("#imagePreviewContainer").hide();
+        $("#imageInput").val("");
     }
 
-    // 🔄 Loading indicator
-    function showLoading() {
-        const loadingHtml =
-            '<div class="d-flex justify-content-start mb-4" id="loadingBubble">' +
-                '<div class="img_cont_msg">' +
-                    '<img src="https://cdn-icons-png.flaticon.com/512/387/387569.png" ' +
-                         'class="rounded-circle user_img_msg">' +
-                '</div>' +
-                '<div class="msg_cotainer">' +
-                    '<i class="fas fa-spinner fa-spin"></i> Thinking...' +
-                '</div>' +
-            '</div>';
+    /* ---------- Audio ---------- */
+    $("#micBtn").click(async function () {
+        if (!mediaRecorder) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
 
-        $("#messageFormeight").append(loadingHtml);
-        $("#messageFormeight").scrollTop(
-            $("#messageFormeight")[0].scrollHeight
-        );
-    }
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = sendAudio;
 
-    function hideLoading() {
-        $("#loadingBubble").remove();
-    }
-
-    let selectedImage = null;
-
-    $(document).ready(function () {
-
-        // 📷 Open image picker
-        $("#imageBtn").on("click", function () {
-            $("#imageInput").click();
-        });
-
-        // 🖼️ Preview image
-        $("#imageInput").on("change", function (e) {
-            selectedImage = e.target.files[0];
-            if (!selectedImage) return;
-
-            const reader = new FileReader();
-            reader.onload = function (e) {
-                $("#imagePreview").attr("src", e.target.result);
-                $("#imagePreviewContainer").show();
-            };
-            reader.readAsDataURL(selectedImage);
-        });
-
-        // ❌ Remove image
-        $("#removeImage").on("click", function () {
-            selectedImage = null;
-            $("#imageInput").val("");
-            $("#imagePreviewContainer").hide();
-        });
-
-        $("#messageArea").on("submit", function (event) {
-            event.preventDefault();
-
-            const rawText = $("#text").val().trim();
-            $("#text").val("");
-
-            if (!rawText && !selectedImage) return;
-
-            const date = new Date();
-            const str_time =
-                date.getHours() + ":" +
-                String(date.getMinutes()).padStart(2, "0");
-
-            // User message bubble
-            const userHtml =
-                '<div class="d-flex justify-content-end mb-4">' +
-                    '<div class="msg_cotainer_send">' +
-                        (rawText || "[Image uploaded]") +
-                        '<span class="msg_time_send">' + str_time + '</span>' +
-                    '</div>' +
-                    '<div class="img_cont_msg">' +
-                        '<img src="https://i.ibb.co/d5b84Xw/Untitled-design.png" ' +
-                             'class="rounded-circle user_img_msg">' +
-                    '</div>' +
-                '</div>';
-
-            $("#messageFormeight").append(userHtml);
-
-            // 🔄 Show loading
-            showLoading();
-
-            // 🧠 IMAGE + TEXT
-            if (selectedImage) {
-                const formData = new FormData();
-                formData.append("image", selectedImage);
-                formData.append("question", rawText);
-
-                $.ajax({
-                    url: "/upload_image",
-                    type: "POST",
-                    data: formData,
-                    contentType: false,
-                    processData: false,
-                }).done(function (data) {
-                    hideLoading();
-                    appendBotMessage(data, str_time);
-                });
-
-                selectedImage = null;
-                $("#imageInput").val("");
-                $("#imagePreviewContainer").hide();
-                return;
-            }
-
-            // 🧠 TEXT ONLY
-            $.ajax({
-                data: { msg: rawText },
-                type: "POST",
-                url: "/get",
-            }).done(function (data) {
-                hideLoading();
-                appendBotMessage(data, str_time);
-            });
-        });
-
-        function appendBotMessage(data, time) {
-            const formatted = formatBotMessage(data);
-
-            const botHtml =
-                '<div class="d-flex justify-content-start mb-4">' +
-                    '<div class="img_cont_msg">' +
-                        '<img src="https://cdn-icons-png.flaticon.com/512/387/387569.png" ' +
-                             'class="rounded-circle user_img_msg">' +
-                    '</div>' +
-                    '<div class="msg_cotainer">' +
-                        formatted +
-                        '<span class="msg_time">' + time + '</span>' +
-                    '</div>' +
-                '</div>';
-
-            $("#messageFormeight").append(botHtml);
-            $("#messageFormeight").scrollTop(
-                $("#messageFormeight")[0].scrollHeight
-            );
+            mediaRecorder.start();
+            $("#micBtn i").removeClass("fa-microphone").addClass("fa-stop");
+        } else {
+            mediaRecorder.stop();
+            mediaRecorder = null;
+            $("#micBtn i").removeClass("fa-stop").addClass("fa-microphone");
         }
     });
-</script>
 
+    function sendAudio() {
+        showLoading("Transcribing…");
+
+        const blob = new Blob(audioChunks, { type: "audio/webm" });
+        const fd = new FormData();
+        fd.append("audio", blob);
+
+        fetch("/transcribe_audio", { method: "POST", body: fd })
+            .then(r => r.json())
+            .then(d => {
+                hideLoading();
+                if (d.text) $("#text").val(d.text);
+            })
+            .catch(hideLoading);
+    }
+
+    /* ---------- Send Message ---------- */
+    $("#messageArea").submit(function (e) {
+        e.preventDefault();
+
+        const text = $("#text").val().trim();
+        $("#text").val("");
+
+        if (!text && !selectedImage) return;
+
+        $("#messageFormeight").append(`
+            <div class="d-flex align-items-start justify-content-end mb-2">
+                <div class="msg_cotainer_send">
+                    ${text || "[Image uploaded]"}
+                </div>
+            </div>
+        `);
+        scrollDown();
+
+        showLoading();
+
+        if (selectedImage) {
+            const fd = new FormData();
+            fd.append("image", selectedImage);
+            fd.append("question", text);
+
+            clearImage(); // 🔥 immediately remove preview
+
+            fetch("/upload_image", { method: "POST", body: fd })
+                .then(r => r.text())
+                .then(handleBotResponse);
+            return;
+        }
+
+        fetch("/get", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "msg=" + encodeURIComponent(text)
+        })
+        .then(r => r.text())
+        .then(handleBotResponse);
+    });
+});
+
+/* ================= Bot Handling ================= */
+
+function handleBotResponse(text) {
+    hideLoading();
+
+    const EMERGENCY_TAG = "[[EMERGENCY]]";
+    const isEmergency = text.startsWith(EMERGENCY_TAG);
+    const cleanText = isEmergency ? text.replace(EMERGENCY_TAG, "").trim() : text;
+
+    $("#messageFormeight").append(`
+        <div class="d-flex align-items-start justify-content-start mb-2">
+            <div class="msg_cotainer">
+                ${formatBotMessage(cleanText)}
+            </div>
+        </div>
+    `);
+    scrollDown();
+
+    if (isEmergency) requestLocation();
+}
+
+/* ================= Location ================= */
+
+function requestLocation() {
+    if (!navigator.geolocation) return;
+
+    showLoading("Finding nearby hospitals…");
+
+    navigator.geolocation.getCurrentPosition(pos => {
+        const fd = new URLSearchParams();
+        fd.append("lat", pos.coords.latitude);
+        fd.append("lng", pos.coords.longitude);
+
+        fetch("/location", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: fd.toString()
+        })
+        .then(r => r.text())
+        .then(text => {
+            hideLoading();
+            $("#messageFormeight").append(`
+                <div class="d-flex align-items-start justify-content-start">
+
+                    <div class="msg_cotainer">
+                        ${formatBotMessage(text)}
+                    </div>
+                </div>
+            `);
+            scrollDown();
+        });
+    });
+}
+</script>
 </body>
 </html>

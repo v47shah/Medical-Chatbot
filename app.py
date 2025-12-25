@@ -2,7 +2,7 @@ from flask import Flask, render_template, request
 from dotenv import load_dotenv
 import os
 import requests
-
+from openai import OpenAI
 # from src.helper import (describe_image, download_hugging_face_embeddings)
 # from src.prompt import chat_prompt, IMAGE_DESCRIPTION_PROMPT
 from src.prompt import *
@@ -19,75 +19,67 @@ load_dotenv()
 
 from src.classifier import classify_intent
 from src.prompt import chat_prompt, IMAGE_DESCRIPTION_PROMPT
-from src.helper import (describe_image, download_hugging_face_embeddings)
+from src.helper import (
+    describe_image,
+    download_hugging_face_embeddings,
+    transcribe_audio
+)
 
 
-# # =========================================================
-# # App + ENV
-# # =========================================================
+# =========================================================
+# ENV
+# =========================================================
+
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
+os.environ["GOOGLE_MAPS_API_KEY"] = GOOGLE_MAPS_API_KEY
+
+# =========================================================
+# APP
+# =========================================================
 
 app = Flask(__name__)
 
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+# =========================================================
+# EMERGENCY DETECTION (SECONDARY SAFETY NET)
+# =========================================================
 
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-os.environ["GOOGLE_MAPS_API_KEY"] = GOOGLE_MAPS_API_KEY
+def is_serious_medical(text: str) -> bool:
+    text = text.lower()
+    return any(flag in text for flag in [
+        "chest pain", "shortness of breath", "can't breathe",
+        "difficulty breathing", "stroke", "seizure",
+        "unconscious", "passed out", "fainted",
+        "severe bleeding", "overdose", "anaphylaxis",
+        "suicidal", "kill myself"
+    ])
 
-# # =========================================================
-# # Conversation State (per session)
-# # =========================================================
-conversation_state = {}
+def emergency_message() -> str:
+    return (
+        "[[EMERGENCY]]\n"
+        "⚠️ **This may be a medical emergency.**\n\n"
+        "Please call emergency services immediately.\n\n"
+        "I can help find nearby hospitals."
+    )
 
-def reset_state(session_id):
-    conversation_state[session_id] = {
-        "has_medical_context": False,
-        "awaiting_location": False
-    }
-
-def get_state(session_id):
-    if session_id not in conversation_state:
-        reset_state(session_id)
-    return conversation_state[session_id]
-
-def set_awaiting_location(session_id, value=True):
-    get_state(session_id)["awaiting_location"] = value
-
-def is_awaiting_location(session_id):
-    return get_state(session_id)["awaiting_location"]
-
-def set_medical_context(session_id):
-    get_state(session_id)["has_medical_context"] = True
-
-def has_medical_context(session_id):
-    return get_state(session_id)["has_medical_context"]
-
-# # =========================================================
-# # Google Maps Helpers
-# # =========================================================
-def geocode_location(address):
-    url = "https://maps.googleapis.com/maps/api/geocode/json"
-    params = {"address": address, "key": GOOGLE_MAPS_API_KEY}
-    res = requests.get(url, params=params).json()
-
-    if not res.get("results"):
-        return None
-
-    loc = res["results"][0]["geometry"]["location"]
-    return loc["lat"], loc["lng"]
+# =========================================================
+# GOOGLE MAPS
+# =========================================================
 
 def get_nearby_hospitals(lat, lng):
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
     params = {
         "location": f"{lat},{lng}",
-        "radius": 5000,  # tighter radius = better relevance
+        "radius": 5000,
         "type": "hospital",
         "key": GOOGLE_MAPS_API_KEY
     }
     return requests.get(url, params=params).json().get("results", [])
-
 
 def add_distances(lat, lng, hospitals):
     if not hospitals:
@@ -107,56 +99,35 @@ def add_distances(lat, lng, hospitals):
     }
 
     data = requests.get(url, params=params).json()
-
     enriched = []
+
     for i, h in enumerate(hospitals):
-        element = data["rows"][0]["elements"][i]
-        if element["status"] != "OK":
-            continue
+        el = data["rows"][0]["elements"][i]
+        if el["status"] == "OK":
+            h["distance"] = el["distance"]["text"]
+            h["duration"] = el["duration"]["text"]
+            h["duration_value"] = el["duration"]["value"]
+            enriched.append(h)
 
-        h["distance"] = element["distance"]["text"]
-        h["duration"] = element["duration"]["text"]
-        h["duration_value"] = element["duration"]["value"]  # seconds
-        enriched.append(h)
-
-    # 🔥 SORT BY TRAVEL TIME
-    enriched.sort(key=lambda x: x["duration_value"])
-
-    # 🔥 TAKE CLOSEST 3
-    return enriched[:5]
-
+    return sorted(enriched, key=lambda x: x["duration_value"])[:5]
 
 def format_hospitals(hospitals):
     if not hospitals:
-        return "I couldn’t find nearby hospitals for that location."
+        return "I couldn’t find nearby hospitals."
 
-    lines = ["🏥 Nearest hospitals to you:\n"]
+    lines = ["🏥 **Nearest hospitals to you:**\n"]
     for i, h in enumerate(hospitals, 1):
         lines.append(
-            f"{i}️⃣ {h.get('name')}\n"
+            f"{i}️⃣ {h['name']}\n"
             f"📍 {h.get('vicinity')}\n"
-            f"📏 {h.get('distance')} • ⏱ {h.get('duration')}\n"
+            f"📏 {h['distance']} • ⏱ {h['duration']}\n"
         )
     return "\n".join(lines)
 
-# # =========================================================
-# # Emergency Detection (rule-based, safe)
-# # =========================================================
-def is_serious_medical(msg):
-    msg = msg.lower()
-    red_flags = [
-        "chest pain", "shortness of breath", "can't breathe",
-        "difficulty breathing", "stroke", "seizure",
-        "unconscious", "passed out", "fainted",
-        "severe bleeding", "bleeding heavily",
-        "overdose", "poisoning", "anaphylaxis",
-        "throat closing", "suicidal", "kill myself"
-    ]
-    return any(flag in msg for flag in red_flags)
+# =========================================================
+# RAG SETUP
+# =========================================================
 
-# # =========================================================
-# # Vector Store + RAG
-# # =========================================================
 embeddings = download_hugging_face_embeddings()
 
 docsearch = PineconeVectorStore.from_existing_index(
@@ -165,7 +136,6 @@ docsearch = PineconeVectorStore.from_existing_index(
 )
 
 retriever = docsearch.as_retriever(search_kwargs={"k": 3})
-
 chat_model = ChatOpenAI(model="gpt-4o", temperature=0)
 
 base_chain = (
@@ -192,129 +162,95 @@ rag_chain = RunnableWithMessageHistory(
 )
 
 # =========================================================
-# Routes
+# ROUTES
 # =========================================================
+
 @app.route("/")
 def index():
-    session_id = request.remote_addr
-    reset_state(session_id)  # 🔥 RESET MEMORY ON REFRESH
     return render_template("chat.html")
 
+# -------------------------
+# TEXT CHAT
+# -------------------------
 @app.route("/get", methods=["POST"])
 def chat():
     msg = request.form["msg"].strip()
     session_id = request.remote_addr
 
-    # ✅ 1. ADDRESS MODE — skip classifier entirely
-    if is_awaiting_location(session_id):
-        coords = geocode_location(msg)
-        if not coords:
-            return "I couldn’t understand that address. Please try again."
-
-        lat, lng = coords
-        hospitals = get_nearby_hospitals(lat, lng)
-        hospitals = add_distances(lat, lng, hospitals)
-
-        set_awaiting_location(session_id, False)
-        return format_hospitals(hospitals)
-
-    # ✅ 2. Normal intent classification
     intent = classify_intent(msg)
 
     # 🚨 Emergency
     if intent == "EMERGENCY" or is_serious_medical(msg):
-        set_medical_context(session_id)
-        set_awaiting_location(session_id, True)
-        return (
-            "⚠️ This may be a medical emergency.\n\n"
-            "If this is urgent, please call your local emergency number immediately.\n\n"
-            "If you want, type your address or city and I’ll find the nearest hospitals."
+        return emergency_message()
+
+    # ✅ Medical only
+    if intent in {"MEDICAL_QUESTION", "MEDICAL_FOLLOWUP"}:
+        return rag_chain.invoke(
+            {"question": msg},
+            config={"configurable": {"session_id": session_id}}
         )
 
     # 👋 Greeting
     if intent == "GREETING":
-        return (
-            "Hi! 👋 I’m a medical chatbot.\n"
-            "I can help with symptoms, conditions, treatments, and emergencies."
-        )
+        return "Hi! 👋 I can help with medical questions."
 
-    # 🩺 Medical question
-    if intent == "MEDICAL_QUESTION":
-        set_medical_context(session_id)
-        return rag_chain.invoke(
-            {"question": msg},
-            config={"configurable": {"session_id": session_id}}
-        )
+    # ❌ Out of scope
+    return "I can only help with medical-related questions."
 
-    # 🔁 Follow-up
-    if intent == "MEDICAL_FOLLOWUP":
-        if not has_medical_context(session_id):
-            return "Could you provide more details about the medical issue?"
-        return rag_chain.invoke(
-            {"question": msg},
-            config={"configurable": {"session_id": session_id}}
-        )
-
-    # 🚫 Out of scope
-    return (
-        "I can only help with medical-related questions or images.\n"
-        "Please ask about symptoms, treatments, or emergencies."
-    )
-
-#########################################################################
-# ==============================
-# IMAGE + TEXT PIPELINE
-# ==============================
+# -------------------------
+# IMAGE + TEXT
+# -------------------------
 @app.route("/upload_image", methods=["POST"])
 def upload_image():
     session_id = request.remote_addr
 
-    image = request.files.get("image")     # optional
+    image = request.files.get("image")
     question = request.form.get("question", "").strip()
 
-    if not image and not question:
-        return "Please provide a question or an image."
+    image_description = describe_image(image) if image else ""
+    combined = f"{question}\nImage observation: {image_description}".strip()
 
-    image_description = ""
+    intent = classify_intent(combined)
 
-    # 1️⃣ IMAGE → VISIBLE DESCRIPTION
-    if image:
-        image_description = describe_image(image)
+    # 🚨 Emergency (still allow image analysis)
+    emergency_prefix = ""
+    if intent == "EMERGENCY" or is_serious_medical(combined):
+        emergency_prefix = emergency_message() + "\n\n"
 
-    # 2️⃣ COMBINE IMAGE + TEXT FOR INTENT
-    combined_text = (
-        f"User text: {question}\n"
-        f"Image observation: {image_description}"
-    ).strip()
-
-    intent = classify_intent(combined_text)
-
-    # 3️⃣ ROUTING (REUSE EXISTING LOGIC)
-    if intent == "EMERGENCY" or is_serious_medical(combined_text):
-        set_medical_context(session_id)
-        set_awaiting_location(session_id, True)
-        return (
-            "⚠️ This may be a medical emergency.\n\n"
-            "If this is urgent, please call your local emergency number immediately.\n\n"
-            "If you want, type your address or city and I’ll find the nearest hospitals."
+    # ✅ Medical only
+    if intent in {"MEDICAL_QUESTION", "MEDICAL_FOLLOWUP", "EMERGENCY"}:
+        response = rag_chain.invoke(
+            {"question": combined},
+            config={"configurable": {"session_id": session_id}}
         )
+        return emergency_prefix + response
 
-    if intent == "OUT_OF_SCOPE":
-        return (
-            "I can only help with medical-related concerns.\n"
-            "Please describe a health issue."
-        )
+    return "I can only help with medical-related images or questions."
 
-    set_medical_context(session_id)
-    return rag_chain.invoke(
-        {"question": combined_text},
-        config={"configurable": {"session_id": session_id}}
-    )
-###############################################################################################
+# -------------------------
+# AUDIO → TEXT
+# -------------------------
+@app.route("/transcribe_audio", methods=["POST"])
+def transcribe_audio_route():
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return {"error": "No audio file received"}, 400
+    return transcribe_audio(audio_file)
+
+# -------------------------
+# LOCATION → HOSPITALS
+# -------------------------
+@app.route("/location", methods=["POST"])
+def handle_location():
+    lat = float(request.form["lat"])
+    lng = float(request.form["lng"])
+
+    hospitals = add_distances(lat, lng, get_nearby_hospitals(lat, lng))
+    return format_hospitals(hospitals)
 
 # =========================================================
-# Run
+# RUN
 # =========================================================
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)
-

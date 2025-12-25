@@ -85,3 +85,39 @@ def describe_image(image_file):
     )
 
     return response.choices[0].message.content.strip()
+
+#############################################################################
+# Audio Transcription Function (Whisper – English only)
+#############################################################################
+from openai import OpenAI
+import tempfile
+import os
+
+audio_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def transcribe_audio(audio_file):
+    """
+    Transcribes English audio using Whisper.
+    Returns:
+        {
+            "text": "..."
+        }
+    """
+    # Save temp file (browser mic usually sends webm)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
+        audio_file.save(tmp.name)
+        temp_path = tmp.name
+
+    try:
+        with open(temp_path, "rb") as f:
+            transcription = audio_client.audio.transcriptions.create(
+                file=f,
+                model="whisper-1",
+                language="en"   # 🔒 ENGLISH ONLY
+            )
+
+        return {"text": transcription.text}
+
+    finally:
+        os.remove(temp_path)
+
