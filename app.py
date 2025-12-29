@@ -31,10 +31,31 @@ from src.helper import (
 # =========================================================
 
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+# GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
+# os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+# os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
+# os.environ["GOOGLE_MAPS_API_KEY"] = GOOGLE_MAPS_API_KEY
+# =========================================================
+# ENV (STRICT, REQUIRED)
+# =========================================================
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        raise RuntimeError(
+            f"Missing required environment variable: {name}. "
+            f"Set it in GitHub Secrets and pass it to docker run."
+        )
+    return value
+
+OPENAI_API_KEY = require_env("OPENAI_API_KEY")
+PINECONE_API_KEY = require_env("PINECONE_API_KEY")
+GOOGLE_MAPS_API_KEY = require_env("GOOGLE_MAPS_API_KEY")
+
+# Only strings reach here — safe to assign
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
 os.environ["GOOGLE_MAPS_API_KEY"] = GOOGLE_MAPS_API_KEY
