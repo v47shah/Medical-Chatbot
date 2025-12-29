@@ -1,4 +1,4 @@
-name: Deploy Application Docker Image to EC2 instance
+name: Deploy Docker Image to EC2
 
 on:
   push:
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Configure AWS credentials
@@ -20,15 +20,22 @@ jobs:
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and push image
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPO: ${{ secrets.ECR_REPO }}
         run: |
-          docker build -t ${{ secrets.ECR_REPO }}:latest .
-          docker tag ${{ secrets.ECR_REPO }}:latest \
-            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO }}:latest
-          docker push \
-            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO }}:latest
+          echo "Building image..."
+          docker build -t $REPO:latest .
+
+          echo "Tagging image..."
+          docker tag $REPO:latest $REGISTRY/$REPO:latest
+
+          echo "Pushing image to ECR..."
+          docker push $REGISTRY/$REPO:latest
 
   Continuous-Deployment:
     needs: Continuous-Integration
@@ -43,20 +50,31 @@ jobs:
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Deploy container
+      - name: Pull and run Docker container
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPO: ${{ secrets.ECR_REPO }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
         run: |
-          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO }}:latest"
+          IMAGE=$REGISTRY/$REPO:latest
 
+          echo "Pulling latest image..."
           docker pull $IMAGE
 
+          echo "Stopping old container if exists..."
           docker stop medical-chatbot || true
           docker rm medical-chatbot || true
 
+          echo "Running new container..."
           docker run -d \
             --name medical-chatbot \
             -p 8080:8080 \
-            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-            -e PINECONE_API_KEY="${{ secrets.PINECONE_API_KEY }}" \
+            -e OPENAI_API_KEY=$OPENAI_API_KEY \
+            -e PINECONE_API_KEY=$PINECONE_API_KEY \
             $IMAGE
+
+          echo "Deployment complete."
