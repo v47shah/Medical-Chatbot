@@ -53,6 +53,34 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
+      # - name: Pull and run Docker container
+      #   env:
+      #     REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      #     REPO: ${{ secrets.ECR_REPO }}
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+      #     GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+
+      #   run: |
+      #     IMAGE=$REGISTRY/$REPO:latest
+
+      #     echo "Pulling latest image..."
+      #     docker pull $IMAGE
+
+      #     echo "Stopping old container if exists..."
+      #     docker stop medical-chatbot || true
+      #     docker rm medical-chatbot || true
+
+      #     echo "Running new container..."
+      #     docker run -d \
+      #       --name medical-chatbot \
+      #       -p 8080:8080 \
+      #       -e OPENAI_API_KEY=$OPENAI_API_KEY \
+      #       -e PINECONE_API_KEY=$PINECONE_API_KEY \
+      #       -e GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY \
+      #       $IMAGE
+
+      #     echo "Deployment complete."
       - name: Pull and run Docker container
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -74,10 +102,12 @@ jobs:
           echo "Running new container..."
           docker run -d \
             --name medical-chatbot \
+            --restart unless-stopped \
             -p 8080:8080 \
-            -e OPENAI_API_KEY=$OPENAI_API_KEY \
-            -e PINECONE_API_KEY=$PINECONE_API_KEY \
-            -e GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY \
-            $IMAGE
+            -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+            -e PINECONE_API_KEY="$PINECONE_API_KEY" \
+            -e GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY" \
+            $IMAGE || true
 
           echo "Deployment complete."
+

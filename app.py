@@ -7,6 +7,7 @@ from openai import OpenAI
 # from src.prompt import chat_prompt, IMAGE_DESCRIPTION_PROMPT
 from src.prompt import *
 import re
+from pinecone import Pinecone
 
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import ChatOpenAI
