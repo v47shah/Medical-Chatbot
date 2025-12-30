@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Medical Chatbot</title>
+    <title>Medical Assistant</title>
 
     <!-- Bootstrap & Icons -->
     <link href="//maxcdn.bootstrapcdn.com/bootstrap/4.1.1/css/bootstrap.min.css" rel="stylesheet">
@@ -16,8 +16,8 @@
 
 <body>
 <div class="container-fluid h-100">
-    <div class="row justify-content-center h-100">
-        <div class="col-md-8 col-xl-6 chat">
+    <div class="row justify-content-center align-items-center h-100">
+        <div class="col-lg-10 col-xl-10 chat">
             <div class="card">
 
                 <!-- Header -->
@@ -26,7 +26,7 @@
                         <img src="https://cdn-icons-png.flaticon.com/512/387/387569.png"
                              class="rounded-circle user_img">
                         <div class="user_info ml-3">
-                            <span>Medical Chatbot</span>
+                            <span>Medical Assistant</span>
                             <p>Ask me anything</p>
                         </div>
                     </div>
@@ -81,7 +81,14 @@
 /* ================= Formatting ================= */
 
 function formatBotMessage(text) {
-    return text
+    // 1. Convert URLs into clickable links
+    const linkified = text.replace(
+        /(https?:\/\/[^\s<]+)/g,
+        `<a href="$1" target="_blank" rel="noopener noreferrer"> Open in Google Maps</a>`
+    );
+
+    // 2. Apply existing formatting
+    return linkified
         .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
         .replace(/^- /gm, "• ")
         .replace(/\n{3,}/g, "\n\n")

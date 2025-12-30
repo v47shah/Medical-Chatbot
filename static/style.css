@@ -23,7 +23,8 @@ html, body {
    ========================================================= */
 
 .card {
-    height: 500px;
+    height: 85vh;
+    max-width: 90vw;
     border-radius: 15px !important;
     background-color: rgba(0, 0, 0, 0.4) !important;
 }

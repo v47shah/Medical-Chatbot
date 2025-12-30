@@ -8,6 +8,8 @@ from openai import OpenAI
 from src.prompt import *
 import re
 from pinecone import Pinecone
+from flask import Flask, render_template, request, session
+import uuid
 
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import ChatOpenAI
@@ -66,7 +68,17 @@ os.environ["GOOGLE_MAPS_API_KEY"] = GOOGLE_MAPS_API_KEY
 # =========================================================
 
 app = Flask(__name__)
+app.secret_key = os.urandom(32)
 
+
+# =========================================================
+# Session Management
+# =========================================================
+def get_session_id():
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+    return session["session_id"]
+ 
 # =========================================================
 # EMERGENCY DETECTION (SECONDARY SAFETY NET)
 # =========================================================
@@ -102,6 +114,15 @@ def get_nearby_hospitals(lat, lng):
         "key": GOOGLE_MAPS_API_KEY
     }
     return requests.get(url, params=params).json().get("results", [])
+
+
+def generate_google_maps_directions_link(lat, lng):
+    return (
+        "https://www.google.com/maps/dir/?api=1"
+        f"&destination={lat},{lng}"
+        "&travelmode=driving"
+    )
+
 
 def add_distances(lat, lng, hospitals):
     if not hospitals:
@@ -139,12 +160,18 @@ def format_hospitals(hospitals):
 
     lines = ["🏥 **Nearest hospitals to you:**\n"]
     for i, h in enumerate(hospitals, 1):
+        lat = h["geometry"]["location"]["lat"]
+        lng = h["geometry"]["location"]["lng"]
+        maps_link = generate_google_maps_directions_link(lat, lng)
+
         lines.append(
             f"{i}️⃣ {h['name']}\n"
             f"📍 {h.get('vicinity')}\n"
             f"📏 {h['distance']} • ⏱ {h['duration']}\n"
+            f"🧭 Get directions: {maps_link}\n"
         )
     return "\n".join(lines)
+
 
 # =========================================================
 # RAG SETUP
@@ -189,6 +216,7 @@ rag_chain = RunnableWithMessageHistory(
 
 @app.route("/")
 def index():
+    session.clear()
     return render_template("chat.html")
 
 # -------------------------
@@ -197,7 +225,7 @@ def index():
 @app.route("/get", methods=["POST"])
 def chat():
     msg = request.form["msg"].strip()
-    session_id = request.remote_addr
+    session_id = get_session_id()
 
     intent = classify_intent(msg)
 
@@ -224,7 +252,7 @@ def chat():
 # -------------------------
 @app.route("/upload_image", methods=["POST"])
 def upload_image():
-    session_id = request.remote_addr
+    session_id = get_session_id()
 
     image = request.files.get("image")
     question = request.form.get("question", "").strip()
